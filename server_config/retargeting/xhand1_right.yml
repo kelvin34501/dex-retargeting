@@ -19,4 +19,4 @@ retargeting:
   scaling_factor: 1.0
 
   # A smaller alpha means stronger filtering, i.e. more smooth but also larger latency
-  low_pass_alpha: 0.2
+  low_pass_alpha: 1.0
