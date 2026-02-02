@@ -1,0 +1,22 @@
+retargeting:
+  type: DexPilot
+  urdf_path: xhand1/xhand1_left/urdf/xhand_left.urdf
+
+  # Target refers to the retargeting target, which is the robot hand (XHand1 Left)
+  # Wrist link name for DexPilot
+  wrist_link_name: "left_hand_link"
+
+  # Fingertip link names for DexPilot
+  finger_tip_link_names: [
+    "left_hand_thumb_rota_tip",
+    "left_hand_index_rota_tip",
+    "left_hand_mid_tip",
+    "left_hand_ring_tip",
+    "left_hand_pinky_tip",
+  ]
+
+  # Scaling factor - adjust based on size difference between human hand and XHand1
+  scaling_factor: 1.0
+
+  # A smaller alpha means stronger filtering, i.e. more smooth but also larger latency
+  low_pass_alpha: 0.2
