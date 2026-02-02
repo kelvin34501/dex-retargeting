@@ -48,11 +48,12 @@ def compute_wrist_transf(joints_3d: np.ndarray, hand_type: str = "right") -> np.
     """
     Compute wrist transformation matrix (4x4) from MANO joints.
     
-    The wrist frame is estimated using:
-    - Position: MANO joint 0 (wrist)
-    - Orientation: Estimated from wrist (0), index MCP (5), and middle MCP (9)
+    Right hand frame convention:
+    - X: points down (from back of hand to palm)
+    - Z: points forward (from wrist to fingers)
+    - Y: points left (from pinky to index)
     
-    Based on the method from single_hand_detector.py:estimate_frame_from_hand_points
+    Left hand is mirrored (Y and X flipped).
     
     Args:
         joints_3d: (21, 3) MANO joint positions in world coordinates
@@ -63,37 +64,32 @@ def compute_wrist_transf(joints_3d: np.ndarray, hand_type: str = "right") -> np.
     """
     assert joints_3d.shape == (21, 3), f"Expected (21, 3), got {joints_3d.shape}"
 
-    # Extract key points: wrist (0), index MCP (5), middle MCP (9)
     wrist_pos = joints_3d[0]
-    points = joints_3d[[0, 5, 9], :]  # wrist, index_mcp, middle_mcp
 
-    # Compute vector from middle MCP to wrist (x-axis direction)
-    x_vector = points[0] - points[2]  # wrist - middle_mcp
+    # Key joint indices: wrist(0), index_mcp(5), middle_mcp(9), ring_mcp(13)
 
-    # Normal fitting with SVD to find palm plane normal
-    points_centered = points - np.mean(points, axis=0, keepdims=True)
-    u, s, v = np.linalg.svd(points_centered)
-    normal = v[2, :]  # Palm plane normal (y-axis candidate)
-
-    # Gram-Schmidt orthonormalization
-    x = x_vector - np.sum(x_vector * normal) * normal
-    x = x / (np.linalg.norm(x) + 1e-8)
-    z = np.cross(x, normal)
+    # Z-axis: from wrist to fingers (wrist -> middle_mcp)
+    z = joints_3d[9] - joints_3d[0]  # middle_mcp - wrist
     z = z / (np.linalg.norm(z) + 1e-8)
 
-    # Ensure z-axis points from pinky to index direction
-    # index_mcp (5) - middle_mcp (9) approximates this direction
-    if np.sum(z * (joints_3d[5] - joints_3d[9])) < 0:
-        normal = -normal
-        z = -z
+    # Approximate Y direction: from ring to index
+    temp_y = joints_3d[5] - joints_3d[13]  # index_mcp - ring_mcp
+
+    # X = temp_y × Z (perpendicular to palm, from back to palm for right hand)
+    x = np.cross(temp_y, z)
+    x = x / (np.linalg.norm(x) + 1e-8)
+
+    # Y = Z × X (orthogonalized Y, from pinky to index)
+    y = np.cross(z, x)
+    y = y / (np.linalg.norm(y) + 1e-8)
 
     # For left hand, mirror the frame
     if hand_type == "left":
-        z = -z
-        normal = -normal
+        y = -y
+        x = -x
 
-    # Build rotation matrix [x, y, z] where y = normal
-    rotation = np.stack([x, normal, z], axis=1)  # (3, 3)
+    # Build rotation matrix [x, y, z]
+    rotation = np.stack([x, y, z], axis=1)  # (3, 3)
 
     # Build 4x4 transformation matrix
     wrist_transf = np.eye(4)
