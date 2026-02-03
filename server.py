@@ -843,11 +843,8 @@ def main(
                         )
                         qpos_rh = retargeter_right.retarget(ref_value)
                         # Apply joint limits (clip) before order conversion to avoid execution errors
-                        qpos_rh = np.clip(
-                            qpos_rh,
-                            retargeter_right.joint_limits[:, 0],
-                            retargeter_right.joint_limits[:, 1]
-                        )
+                        qpos_rh = np.clip(qpos_rh, retargeter_right.joint_limits[:, 0],
+                                          retargeter_right.joint_limits[:, 1])
                         # Convert from pinocchio order to URDF original order for output
                         qpos_rh_urdf = qpos_rh[idx_urdf2pin_right]
                         result["hand_right"] = qpos_rh_urdf.tolist()
@@ -879,11 +876,8 @@ def main(
                         )
                         qpos_lh = retargeter_left.retarget(ref_value)
                         # Apply joint limits (clip) before order conversion to avoid execution errors
-                        qpos_lh = np.clip(
-                            qpos_lh,
-                            retargeter_left.joint_limits[:, 0],
-                            retargeter_left.joint_limits[:, 1]
-                        )
+                        qpos_lh = np.clip(qpos_lh, retargeter_left.joint_limits[:, 0], retargeter_left.joint_limits[:,
+                                                                                                                    1])
                         # Convert from pinocchio order to URDF original order for output
                         qpos_lh_urdf = qpos_lh[idx_urdf2pin_left]
                         result["hand_left"] = qpos_lh_urdf.tolist()
