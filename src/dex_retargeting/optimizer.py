@@ -203,15 +203,15 @@ class PositionOptimizer(Optimizer):
 class PositionCustomOptimizer(Optimizer):
     """Custom position-based retargeting optimizer.
     
-    This optimizer uses wrist-relative positions for retargeting, which provides
-    better handling of hand translation and rotation. It computes the target link
-    positions relative to the wrist link and optimizes to match these relative positions.
+    This optimizer uses absolute positions for retargeting, directly matching
+    target link positions in the global frame without considering wrist-relative
+    transformations.
     
     Args:
         robot: RobotWrapper instance
         target_joint_names: List of joint names to optimize
         target_link_names: List of target link names (fingertips, etc.)
-        wrist_link_name: Name of the wrist link for relative position computation
+        wrist_link_name: Name of the wrist link (kept for API compatibility)
         target_link_human_indices: Human hand joint indices corresponding to target links
         huber_delta: Delta parameter for Huber loss
         norm_delta: Regularization parameter for smoothness
@@ -240,7 +240,6 @@ class PositionCustomOptimizer(Optimizer):
 
         # Sanity check and cache link indices
         self.target_link_indices = self.get_link_indices(target_link_names)
-        self.wrist_link_index = self.robot.get_link_index(wrist_link_name)
 
         self.opt.set_ftol_abs(1e-5)
 
@@ -249,7 +248,7 @@ class PositionCustomOptimizer(Optimizer):
     ):
         """
         Args:
-            target_pos: Target positions in wrist-relative coordinates, shape (n, 3)
+            target_pos: Target positions in global coordinates, shape (n, 3)
             fixed_qpos: Fixed joint positions
             last_qpos: Last optimization result for regularization
         """
@@ -268,26 +267,16 @@ class PositionCustomOptimizer(Optimizer):
 
             self.robot.compute_forward_kinematics(qpos)
             
-            # Get wrist pose for relative position computation
-            wrist_pose = self.robot.get_link_pose(self.wrist_link_index)
-            wrist_pos = wrist_pose[:3, 3]
-            wrist_rot = wrist_pose[:3, :3]
-            
-            # Get target link poses
+            # Get target link poses (absolute positions in global frame)
             target_link_poses = [
                 self.robot.get_link_pose(index) for index in self.target_link_indices
             ]
             body_pos = np.stack(
                 [pose[:3, 3] for pose in target_link_poses], axis=0
             )  # (n, 3)
-            
-            # Compute wrist-relative positions (in wrist local frame)
-            relative_pos = body_pos - wrist_pos  # (n, 3)
-            # Transform to wrist local frame
-            relative_pos_local = (wrist_rot.T @ relative_pos.T).T  # (n, 3)
 
             # Torch computation for accurate loss and grad
-            torch_body_pos = torch.as_tensor(relative_pos_local)
+            torch_body_pos = torch.as_tensor(body_pos)
             torch_body_pos.requires_grad_()
 
             # Loss term for kinematics retargeting based on 3D position error
@@ -296,11 +285,6 @@ class PositionCustomOptimizer(Optimizer):
 
             if grad.size > 0:
                 jacobians = []
-                wrist_jacobian = self.robot.compute_single_link_local_jacobian(
-                    qpos, self.wrist_link_index
-                )[:3, ...]
-                wrist_jacobian_global = wrist_rot @ wrist_jacobian
-                
                 for i, index in enumerate(self.target_link_indices):
                     link_body_jacobian = self.robot.compute_single_link_local_jacobian(
                         qpos, index
@@ -308,10 +292,7 @@ class PositionCustomOptimizer(Optimizer):
                     link_pose = target_link_poses[i]
                     link_rot = link_pose[:3, :3]
                     link_kinematics_jacobian = link_rot @ link_body_jacobian
-                    
-                    # Jacobian for relative position in wrist local frame
-                    relative_jacobian = wrist_rot.T @ (link_kinematics_jacobian - wrist_jacobian_global)
-                    jacobians.append(relative_jacobian)
+                    jacobians.append(link_kinematics_jacobian)
 
                 # Note: the joint order in this jacobian is consistent pinocchio
                 jacobians = np.stack(jacobians, axis=0)
