@@ -200,6 +200,142 @@ class PositionOptimizer(Optimizer):
         return objective
 
 
+class PositionCustomOptimizer(Optimizer):
+    """Custom position-based retargeting optimizer.
+    
+    This optimizer uses wrist-relative positions for retargeting, which provides
+    better handling of hand translation and rotation. It computes the target link
+    positions relative to the wrist link and optimizes to match these relative positions.
+    
+    Args:
+        robot: RobotWrapper instance
+        target_joint_names: List of joint names to optimize
+        target_link_names: List of target link names (fingertips, etc.)
+        wrist_link_name: Name of the wrist link for relative position computation
+        target_link_human_indices: Human hand joint indices corresponding to target links
+        huber_delta: Delta parameter for Huber loss
+        norm_delta: Regularization parameter for smoothness
+        scaling: Scaling factor for human hand to robot hand size difference
+    """
+
+    retargeting_type = "POSITION_CUSTOM"
+
+    def __init__(
+        self,
+        robot: RobotWrapper,
+        target_joint_names: List[str],
+        target_link_names: List[str],
+        wrist_link_name: str,
+        target_link_human_indices: np.ndarray,
+        huber_delta=0.02,
+        norm_delta=4e-3,
+        scaling=1.0,
+    ):
+        super().__init__(robot, target_joint_names, target_link_human_indices)
+        self.body_names = target_link_names
+        self.wrist_link_name = wrist_link_name
+        self.huber_loss = torch.nn.SmoothL1Loss(beta=huber_delta)
+        self.norm_delta = norm_delta
+        self.scaling = scaling
+
+        # Sanity check and cache link indices
+        self.target_link_indices = self.get_link_indices(target_link_names)
+        self.wrist_link_index = self.robot.get_link_index(wrist_link_name)
+
+        self.opt.set_ftol_abs(1e-5)
+
+    def get_objective_function(
+        self, target_pos: np.ndarray, fixed_qpos: np.ndarray, last_qpos: np.ndarray
+    ):
+        """
+        Args:
+            target_pos: Target positions in wrist-relative coordinates, shape (n, 3)
+            fixed_qpos: Fixed joint positions
+            last_qpos: Last optimization result for regularization
+        """
+        qpos = np.zeros(self.num_joints)
+        qpos[self.idx_pin2fixed] = fixed_qpos
+        # Apply scaling to target positions
+        torch_target_pos = torch.as_tensor(target_pos * self.scaling)
+        torch_target_pos.requires_grad_(False)
+
+        def objective(x: np.ndarray, grad: np.ndarray) -> float:
+            qpos[self.idx_pin2target] = x
+
+            # Kinematics forwarding for qpos
+            if self.adaptor is not None:
+                qpos[:] = self.adaptor.forward_qpos(qpos)[:]
+
+            self.robot.compute_forward_kinematics(qpos)
+            
+            # Get wrist pose for relative position computation
+            wrist_pose = self.robot.get_link_pose(self.wrist_link_index)
+            wrist_pos = wrist_pose[:3, 3]
+            wrist_rot = wrist_pose[:3, :3]
+            
+            # Get target link poses
+            target_link_poses = [
+                self.robot.get_link_pose(index) for index in self.target_link_indices
+            ]
+            body_pos = np.stack(
+                [pose[:3, 3] for pose in target_link_poses], axis=0
+            )  # (n, 3)
+            
+            # Compute wrist-relative positions (in wrist local frame)
+            relative_pos = body_pos - wrist_pos  # (n, 3)
+            # Transform to wrist local frame
+            relative_pos_local = (wrist_rot.T @ relative_pos.T).T  # (n, 3)
+
+            # Torch computation for accurate loss and grad
+            torch_body_pos = torch.as_tensor(relative_pos_local)
+            torch_body_pos.requires_grad_()
+
+            # Loss term for kinematics retargeting based on 3D position error
+            huber_distance = self.huber_loss(torch_body_pos, torch_target_pos)
+            result = huber_distance.cpu().detach().item()
+
+            if grad.size > 0:
+                jacobians = []
+                wrist_jacobian = self.robot.compute_single_link_local_jacobian(
+                    qpos, self.wrist_link_index
+                )[:3, ...]
+                wrist_jacobian_global = wrist_rot @ wrist_jacobian
+                
+                for i, index in enumerate(self.target_link_indices):
+                    link_body_jacobian = self.robot.compute_single_link_local_jacobian(
+                        qpos, index
+                    )[:3, ...]
+                    link_pose = target_link_poses[i]
+                    link_rot = link_pose[:3, :3]
+                    link_kinematics_jacobian = link_rot @ link_body_jacobian
+                    
+                    # Jacobian for relative position in wrist local frame
+                    relative_jacobian = wrist_rot.T @ (link_kinematics_jacobian - wrist_jacobian_global)
+                    jacobians.append(relative_jacobian)
+
+                # Note: the joint order in this jacobian is consistent pinocchio
+                jacobians = np.stack(jacobians, axis=0)
+                huber_distance.backward()
+                grad_pos = torch_body_pos.grad.cpu().numpy()[:, None, :]
+
+                # Convert the jacobian from pinocchio order to target order
+                if self.adaptor is not None:
+                    jacobians = self.adaptor.backward_jacobian(jacobians)
+                else:
+                    jacobians = jacobians[..., self.idx_pin2target]
+
+                # Compute the gradient to the qpos
+                grad_qpos = np.matmul(grad_pos, jacobians)
+                grad_qpos = grad_qpos.mean(1).sum(0)
+                grad_qpos += 2 * self.norm_delta * (x - last_qpos)
+
+                grad[:] = grad_qpos[:]
+
+            return result
+
+        return objective
+
+
 class VectorOptimizer(Optimizer):
     retargeting_type = "VECTOR"
 

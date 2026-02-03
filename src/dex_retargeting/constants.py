@@ -37,6 +37,7 @@ class RetargetingType(enum.Enum):
         enum.auto()
     )  # For offline data processing, especially hand-object interaction data
     dexpilot = enum.auto()  # For teleoperation, with finger closing prior
+    position_custom = enum.auto()  # Custom position-based retargeting
 
 
 class HandType(enum.Enum):

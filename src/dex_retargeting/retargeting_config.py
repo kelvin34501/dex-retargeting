@@ -62,7 +62,7 @@ class RetargetingConfig:
     # Low pass filter
     low_pass_alpha: float = 0.1
 
-    _TYPE = ["vector", "position", "dexpilot"]
+    _TYPE = ["vector", "position", "dexpilot", "position_custom"]
     _DEFAULT_URDF_DIR = "./"
 
     def __post_init__(self):
@@ -123,6 +123,21 @@ class RetargetingConfig:
                     "\033[00m",
                 )
 
+        elif self.type == "position_custom":
+            if self.target_link_names is None:
+                raise ValueError("PositionCustom retargeting requires: target_link_names")
+            if self.wrist_link_name is None:
+                raise ValueError("PositionCustom retargeting requires: wrist_link_name")
+            self.target_link_human_indices = self.target_link_human_indices.squeeze()
+            if self.target_link_human_indices.shape != (len(self.target_link_names),):
+                raise ValueError(
+                    "PositionCustom retargeting link names and link indices dim mismatch"
+                )
+            if self.target_link_human_indices is None:
+                raise ValueError(
+                    "PositionCustom retargeting requires: target_link_human_indices"
+                )
+
         # URDF path check
         urdf_path = Path(self.urdf_path)
         if not urdf_path.is_absolute():
@@ -169,6 +184,7 @@ class RetargetingConfig:
             VectorOptimizer,
             PositionOptimizer,
             DexPilotOptimizer,
+            PositionCustomOptimizer,
         )
         import tempfile
 
@@ -225,6 +241,17 @@ class RetargetingConfig:
                 scaling=self.scaling_factor,
                 project_dist=self.project_dist,
                 escape_dist=self.escape_dist,
+            )
+        elif self.type == "position_custom":
+            optimizer = PositionCustomOptimizer(
+                robot,
+                joint_names,
+                target_link_names=self.target_link_names,
+                wrist_link_name=self.wrist_link_name,
+                target_link_human_indices=self.target_link_human_indices,
+                norm_delta=self.normal_delta,
+                huber_delta=self.huber_delta,
+                scaling=self.scaling_factor,
             )
         else:
             raise RuntimeError()

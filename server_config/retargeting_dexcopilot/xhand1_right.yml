@@ -1,23 +1,19 @@
 retargeting:
-  type: position_custom
+  type: DexPilot
   urdf_path: xhand1/xhand1_right/urdf/xhand_right.urdf
 
   # Target refers to the retargeting target, which is the robot hand (XHand1)
-  # Wrist link name for position_custom retargeting
+  # Wrist link name for DexPilot
   wrist_link_name: "right_hand_link"
 
-  # Target link names for position_custom retargeting (fingertips)
-  target_link_names: [
+  # Fingertip link names for DexPilot
+  finger_tip_link_names: [
     "right_hand_thumb_rota_tip",
     "right_hand_index_rota_tip",
     "right_hand_mid_tip",
     "right_hand_ring_tip",
     "right_hand_pinky_tip",
   ]
-
-  # Human hand joint indices corresponding to each target link
-  # MediaPipe hand landmarks: 4=thumb_tip, 8=index_tip, 12=middle_tip, 16=ring_tip, 20=pinky_tip
-  target_link_human_indices: [ 4, 8, 12, 16, 20 ]
 
   # Scaling factor - adjust based on size difference between human hand and XHand1
   scaling_factor: 1.0
