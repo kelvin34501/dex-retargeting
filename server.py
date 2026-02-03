@@ -536,6 +536,27 @@ def compute_retarget_ref_value(
     return ref_value
 
 
+def compute_position_ref_value(
+    joints_3d: np.ndarray,
+    target_indices: np.ndarray,
+) -> np.ndarray:
+    """
+    Compute reference value for position-based retargeting from MANO joints.
+    
+    For position retargeting, we directly use the target joint positions
+    (in wrist-local coordinates).
+    
+    Args:
+        joints_3d: (21, 3) MANO joint positions in wrist-local coordinates
+        target_indices: 1D array of target joint indices (e.g., [4, 8, 12, 16, 20] for fingertips)
+    
+    Returns:
+        ref_value: (N, 3) target positions in wrist-local coordinates
+    """
+    ref_value = joints_3d[target_indices]  # (N, 3)
+    return ref_value
+
+
 def main(
     cmd_channel: str,
     sub_channel: str,
@@ -624,16 +645,26 @@ def main(
 
     # Right hand retargeter
     retargeter_right = None
+    retarget_type_right = None  # Store retargeting type for ref_value computation
     origin_indices_right = None
     task_indices_right = None
+    target_indices_right = None  # For position/position_custom types (1D indices)
     idx_urdf2pin_right = None  # Mapping from URDF order to pinocchio order (always set when retargeter exists)
     if retarget_config_right_path:
         config_right = RetargetingConfig.load_from_file(retarget_config_right_path)
         retargeter_right = config_right.build()
-        # Get indices from optimizer (works for both vector and DexPilot)
-        # DexPilot auto-generates target_link_human_indices in optimizer init
-        origin_indices_right = retargeter_right.optimizer.target_link_human_indices[0, :]
-        task_indices_right = retargeter_right.optimizer.target_link_human_indices[1, :]
+        retarget_type_right = config_right.type
+
+        # Get indices based on retargeting type
+        if retarget_type_right in ["position", "position_custom"]:
+            # Position-based retargeting uses 1D target indices
+            target_indices_right = retargeter_right.optimizer.target_link_human_indices
+            _logger.info(f"Right hand target_indices (position): {target_indices_right.tolist()}")
+        else:
+            # Vector/DexPilot retargeting uses 2D indices (origin, task)
+            # DexPilot auto-generates target_link_human_indices in optimizer init
+            origin_indices_right = retargeter_right.optimizer.target_link_human_indices[0, :]
+            task_indices_right = retargeter_right.optimizer.target_link_human_indices[1, :]
 
         # Build pin2urdf mapping for output order conversion (guaranteed to exist when retargeter exists)
         urdf_joint_names_right = get_urdf_joint_order(config_right.urdf_path)
@@ -646,32 +677,28 @@ def main(
 
     # Left hand retargeter
     retargeter_left = None
+    retarget_type_left = None  # Store retargeting type for ref_value computation
     origin_indices_left = None
     task_indices_left = None
+    target_indices_left = None  # For position/position_custom types (1D indices)
     idx_urdf2pin_left = None  # Mapping from URDF order to pinocchio order (always set when retargeter exists)
     if retarget_config_left_path:
         config_left = RetargetingConfig.load_from_file(retarget_config_left_path)
         retargeter_left = config_left.build()
-        # Get indices from optimizer (works for both vector and DexPilot)
-        # DexPilot auto-generates target_link_human_indices in optimizer init
-        origin_indices_left = retargeter_left.optimizer.target_link_human_indices[0, :]
-        task_indices_left = retargeter_left.optimizer.target_link_human_indices[1, :]
+        retarget_type_left = config_left.type
+
+        # Get indices based on retargeting type
+        if retarget_type_left in ["position", "position_custom"]:
+            # Position-based retargeting uses 1D target indices
+            target_indices_left = retargeter_left.optimizer.target_link_human_indices
+            _logger.info(f"Left hand target_indices (position): {target_indices_left.tolist()}")
+        else:
+            # Vector/DexPilot retargeting uses 2D indices (origin, task)
+            # DexPilot auto-generates target_link_human_indices in optimizer init
+            origin_indices_left = retargeter_left.optimizer.target_link_human_indices[0, :]
+            task_indices_left = retargeter_left.optimizer.target_link_human_indices[1, :]
 
         # Build pin2urdf mapping for output order conversion (guaranteed to exist when retargeter exists)
-        urdf_joint_names_left = get_urdf_joint_order(config_left.urdf_path)
-        pin_joint_names_left = retargeter_left.joint_names
-        idx_urdf2pin_left = get_pin2urdf_mapping(pin_joint_names_left, urdf_joint_names_left)
-        _logger.info(f"Left hand retargeter loaded, type: {config_left.type}, DOF: {retargeter_left.optimizer.opt_dof}")
-        _logger.info(f"Left hand URDF joint order: {urdf_joint_names_left}")
-        _logger.info(f"Left hand idx_urdf2pin: {idx_urdf2pin_left.tolist()}")
-        config_left = RetargetingConfig.load_from_file(retarget_config_left_path)
-        retargeter_left = config_left.build()
-        # Get indices from optimizer (works for both vector and DexPilot)
-        # DexPilot auto-generates target_link_human_indices in optimizer init
-        origin_indices_left = retargeter_left.optimizer.target_link_human_indices[0, :]
-        task_indices_left = retargeter_left.optimizer.target_link_human_indices[1, :]
-
-        # Build pin2urdf mapping for output order conversion
         urdf_joint_names_left = get_urdf_joint_order(config_left.urdf_path)
         pin_joint_names_left = retargeter_left.joint_names
         idx_urdf2pin_left = get_pin2urdf_mapping(pin_joint_names_left, urdf_joint_names_left)
@@ -835,12 +862,20 @@ def main(
                         # Shift the hand in local coordinates before retargeting
                         joints_rh_local += MANO_LOCAL_Z_OFFSET
 
-                        # Compute reference vectors in wrist-local coordinates
-                        ref_value = compute_retarget_ref_value(
-                            joints_rh_local,
-                            origin_indices_right,
-                            task_indices_right,
-                        )
+                        # Compute reference value based on retargeting type
+                        if retarget_type_right in ["position", "position_custom"]:
+                            # Position-based: use target positions directly
+                            ref_value = compute_position_ref_value(
+                                joints_rh_local,
+                                target_indices_right,
+                            )
+                        else:
+                            # Vector/DexPilot: use direction vectors
+                            ref_value = compute_retarget_ref_value(
+                                joints_rh_local,
+                                origin_indices_right,
+                                task_indices_right,
+                            )
                         qpos_rh = retargeter_right.retarget(ref_value)
                         # Apply joint limits (clip) before order conversion to avoid execution errors
                         qpos_rh = np.clip(qpos_rh, retargeter_right.joint_limits[:, 0],
@@ -868,12 +903,20 @@ def main(
                         # Shift the hand in local coordinates before retargeting
                         joints_lh_local += MANO_LOCAL_Z_OFFSET
 
-                        # Compute reference vectors in wrist-local coordinates
-                        ref_value = compute_retarget_ref_value(
-                            joints_lh_local,
-                            origin_indices_left,
-                            task_indices_left,
-                        )
+                        # Compute reference value based on retargeting type
+                        if retarget_type_left in ["position", "position_custom"]:
+                            # Position-based: use target positions directly
+                            ref_value = compute_position_ref_value(
+                                joints_lh_local,
+                                target_indices_left,
+                            )
+                        else:
+                            # Vector/DexPilot: use direction vectors
+                            ref_value = compute_retarget_ref_value(
+                                joints_lh_local,
+                                origin_indices_left,
+                                task_indices_left,
+                            )
                         qpos_lh = retargeter_left.retarget(ref_value)
                         # Apply joint limits (clip) before order conversion to avoid execution errors
                         qpos_lh = np.clip(qpos_lh, retargeter_left.joint_limits[:, 0], retargeter_left.joint_limits[:,
