@@ -20,7 +20,7 @@ retargeting:
   target_link_human_indices: [ 4, 8, 12, 16, 20 ]
 
   # Scaling factor - adjust based on size difference between human hand and XHand1
-  scaling_factor: 1.0
+  scaling_factor: 1.0 # for actual closing
 
   # A smaller alpha means stronger filtering, i.e. more smooth but also larger latency
-  low_pass_alpha: 1.0
+  low_pass_alpha: 0.66

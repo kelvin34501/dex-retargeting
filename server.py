@@ -68,7 +68,7 @@ MANO_SKELETON = [
 
 # Z-axis offset (in meters) applied to MANO joints in local coordinates before retargeting
 # This shifts the hand forward (along fingers direction) to better match robot hand kinematics
-MANO_LOCAL_Z_OFFSET = np.array([0.0, 0.0, 0.02])
+MANO_LOCAL_Z_OFFSET = np.array([0.0, 0.0, 0.018], dtype=np.float32)
 
 _logger = logging.getLogger(__name__)
 
