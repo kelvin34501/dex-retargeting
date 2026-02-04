@@ -615,6 +615,7 @@ def main(
     retarget_config_right_path = None
     retarget_config_left_path = None
     urdf_base_dir = None
+    prefer_scaled_pose = False  # Default: use original joints
 
     while retarget_config_right_path is None:
         try:
@@ -626,9 +627,11 @@ def main(
                     retarget_config_right_path = cmd_data.get("retarget_config_right", "")
                     retarget_config_left_path = cmd_data.get("retarget_config_left", "")
                     urdf_base_dir = cmd_data.get("urdf_base_dir", "./asset/env")
+                    prefer_scaled_pose = cmd_data.get("prefer_scaled_pose", False)
                     _logger.info(f"Received retarget_config_right: {retarget_config_right_path}")
                     _logger.info(f"Received retarget_config_left: {retarget_config_left_path}")
                     _logger.info(f"Received urdf_base_dir: {urdf_base_dir}")
+                    _logger.info(f"Received prefer_scaled_pose: {prefer_scaled_pose}")
                 elif cmd_data.get("cmd") == "ping":
                     cmd_socket.send_string(json.dumps({
                         "status": "pong",
@@ -849,7 +852,12 @@ def main(
             # Right hand
             rh_data = pose_3d.get("rh")
             if rh_data is not None and retargeter_right is not None:
-                joints_rh = rh_data.get("joints")  # (21, 3) MANO joints
+                # Select joints based on prefer_scaled flag (can be overridden per-message)
+                msg_prefer_scaled = data.get("prefer_scaled", prefer_scaled_pose)
+                if msg_prefer_scaled and "joints_scaled" in rh_data:
+                    joints_rh = rh_data["joints_scaled"]  # (21, 3) scaled MANO joints
+                else:
+                    joints_rh = rh_data.get("joints")  # (21, 3) original MANO joints
                 if joints_rh is not None:
                     try:
                         # Compute wrist transformation first (needed for coordinate transform)
@@ -890,7 +898,12 @@ def main(
             # Left hand
             lh_data = pose_3d.get("lh")
             if lh_data is not None and retargeter_left is not None:
-                joints_lh = lh_data.get("joints")  # (21, 3) MANO joints
+                # Select joints based on prefer_scaled flag (can be overridden per-message)
+                msg_prefer_scaled = data.get("prefer_scaled", prefer_scaled_pose)
+                if msg_prefer_scaled and "joints_scaled" in lh_data:
+                    joints_lh = lh_data["joints_scaled"]  # (21, 3) scaled MANO joints
+                else:
+                    joints_lh = lh_data.get("joints")  # (21, 3) original MANO joints
                 if joints_lh is not None:
                     try:
                         # Compute wrist transformation first (needed for coordinate transform)
@@ -937,12 +950,17 @@ def main(
                 try:
                     # Update right hand visualization
                     if rh_data is not None and result["hand_right"] is not None:
-                        joints_rh = rh_data.get("joints")
-                        if joints_rh is not None:
+                        # Use scaled joints for viz if prefer_scaled, otherwise original
+                        msg_prefer_scaled = data.get("prefer_scaled", prefer_scaled_pose)
+                        if msg_prefer_scaled and "joints_scaled" in rh_data:
+                            joints_rh_viz = rh_data["joints_scaled"]
+                        else:
+                            joints_rh_viz = rh_data.get("joints")
+                        if joints_rh_viz is not None:
                             # Update MANO visual (offset to the right side)
                             if mano_visual_right is not None:
                                 _inv_mat = np.linalg.inv(wrist_transf_rh)
-                                joints_rh_to_viz = (_inv_mat[:3, :3] @ joints_rh.T).T + _inv_mat[:3, 3]
+                                joints_rh_to_viz = (_inv_mat[:3, :3] @ joints_rh_viz.T).T + _inv_mat[:3, 3]
                                 joints_rh_to_viz += MANO_LOCAL_Z_OFFSET
                                 update_mano_visual(joints_rh_to_viz, mano_visual_right, offset=np.array([0.3, 0, 0]))
                             # Update robot qpos
@@ -952,12 +970,17 @@ def main(
 
                     # Update left hand visualization
                     if lh_data is not None and result["hand_left"] is not None:
-                        joints_lh = lh_data.get("joints")
-                        if joints_lh is not None:
+                        # Use scaled joints for viz if prefer_scaled, otherwise original
+                        msg_prefer_scaled = data.get("prefer_scaled", prefer_scaled_pose)
+                        if msg_prefer_scaled and "joints_scaled" in lh_data:
+                            joints_lh_viz = lh_data["joints_scaled"]
+                        else:
+                            joints_lh_viz = lh_data.get("joints")
+                        if joints_lh_viz is not None:
                             # Update MANO visual (offset to the left side)
                             if mano_visual_left is not None:
                                 _inv_mat = np.linalg.inv(wrist_transf_lh)
-                                joints_lh_to_viz = (_inv_mat[:3, :3] @ joints_lh.T).T + _inv_mat[:3, 3]
+                                joints_lh_to_viz = (_inv_mat[:3, :3] @ joints_lh_viz.T).T + _inv_mat[:3, 3]
                                 joints_lh_to_viz += MANO_LOCAL_Z_OFFSET
                                 update_mano_visual(joints_lh_to_viz, mano_visual_left, offset=np.array([-0.3, 0, 0]))
                             # Update robot qpos
