@@ -806,7 +806,13 @@ def main(
     signal.signal(signal.SIGTERM, _sigterm_handler)
     signal.signal(signal.SIGHUP, _sigterm_handler)
 
+    _cleanup_done = False
+
     def cleanup():
+        nonlocal _cleanup_done
+        if _cleanup_done:
+            return
+        _cleanup_done = True
         _logger.info("Cleaning up...")
         cmd_socket.close()
         sub_socket.close()
