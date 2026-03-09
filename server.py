@@ -72,7 +72,7 @@ MANO_SKELETON = [
 # This shifts the hand forward (along fingers direction) to better match robot hand kinematics
 MANO_LOCAL_Z_OFFSET = np.array([0.0, 0.0, 0.018], dtype=np.float32)
 
-_logger = logging.getLogger(__name__)
+_logger = logging.getLogger("dex-retargeting")
 
 # ========== Visualization utilities ==========
 
